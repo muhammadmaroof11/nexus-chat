@@ -3,12 +3,33 @@ import { motion, AnimatePresence } from 'framer-motion';
 import { User, Sparkles, Copy, Check, RotateCcw, ArrowDown, Edit3 } from 'lucide-react';
 import MarkdownRenderer from './MarkdownRenderer';
 
-const PROVIDER_NAMES = {
+const MODEL_REGISTRY = {
   'gemini-2.5-flash': { name: 'Gemini 2.5 Flash', provider: 'Google', dotClass: 'gemini' },
   'gemini-2.5-pro': { name: 'Gemini 2.5 Pro', provider: 'Google', dotClass: 'gemini' },
+  'openai/gpt-oss-120b': { name: 'GPT OSS 120B', provider: 'Groq', dotClass: 'grok' },
+  'openai/gpt-oss-20b': { name: 'GPT OSS 20B', provider: 'Groq', dotClass: 'grok' },
+  'qwen/qwen3.8-27b': { name: 'Qwen 3.8 27B', provider: 'Groq', dotClass: 'grok' },
   'grok-3': { name: 'Grok 3', provider: 'xAI', dotClass: 'grok' },
   'grok-3-mini': { name: 'Grok 3 Mini', provider: 'xAI', dotClass: 'grok' },
 };
+
+function getModelInfo(modelId) {
+  if (!modelId) return { name: 'NexusChat AI', provider: 'AI', dotClass: 'gemini' };
+  if (MODEL_REGISTRY[modelId]) return MODEL_REGISTRY[modelId];
+
+  // Dynamic fallback
+  if (modelId.startsWith('gemini')) {
+    return { name: modelId, provider: 'Google', dotClass: 'gemini' };
+  }
+  if (modelId.startsWith('openai/') || modelId.startsWith('qwen/')) {
+    const raw = modelId.split('/')[1] || modelId;
+    return { name: raw.toUpperCase(), provider: 'Groq', dotClass: 'grok' };
+  }
+  if (modelId.startsWith('grok')) {
+    return { name: modelId, provider: 'xAI', dotClass: 'grok' };
+  }
+  return { name: modelId, provider: 'AI', dotClass: 'gemini' };
+}
 
 function formatTime(ts) {
   if (!ts) return '';
@@ -40,8 +61,8 @@ export default function ChatMessages({
     const el = containerRef.current;
     if (!el) return;
     const distanceToBottom = el.scrollHeight - el.scrollTop - el.clientHeight;
-    // Show button if more than 150px away from bottom
-    const isScrolledUp = distanceToBottom > 150;
+    // Show button if more than 140px away from bottom
+    const isScrolledUp = distanceToBottom > 140;
     setShowScrollBtn(isScrolledUp);
     isAutoScrollingRef.current = distanceToBottom < 60;
   }, []);
@@ -66,11 +87,7 @@ export default function ChatMessages({
     setTimeout(() => setCopiedIndex(null), 2000);
   };
 
-  const currentModelInfo = PROVIDER_NAMES[selectedModel] || {
-    name: selectedModel,
-    provider: 'AI',
-    dotClass: '',
-  };
+  const currentModelInfo = getModelInfo(selectedModel);
 
   return (
     <div className="chat-area" ref={containerRef} onScroll={handleScroll}>
@@ -78,11 +95,7 @@ export default function ChatMessages({
         <AnimatePresence initial={false}>
           {messages.map((msg, i) => {
             const isUser = msg.role === 'user';
-            const modelInfo = PROVIDER_NAMES[msg.model] || {
-              name: msg.model || 'AI Assistant',
-              provider: 'AI',
-              dotClass: '',
-            };
+            const modelInfo = getModelInfo(msg.model);
             const words = countWords(msg.content);
             const isLastAssistant = !isUser && i === messages.length - 1;
 
@@ -115,18 +128,21 @@ export default function ChatMessages({
                     )}
                   </div>
 
-                  {/* Content */}
-                  <div className="msg-content">
-                    {isUser ? (
-                      <div style={{ whiteSpace: 'pre-wrap' }}>{msg.content}</div>
-                    ) : (
-                      <MarkdownRenderer content={msg.content} />
-                    )}
-                  </div>
+                  {/* Content (No duplicate .msg-content nesting for assistant) */}
+                  {isUser ? (
+                    <div className="msg-content">
+                      <div className="user-bubble" style={{ whiteSpace: 'pre-wrap' }}>
+                        {msg.content}
+                      </div>
+                    </div>
+                  ) : (
+                    <MarkdownRenderer content={msg.content} />
+                  )}
 
                   {/* Actions */}
                   <div className="msg-actions">
                     <button
+                      type="button"
                       className={`msg-action-btn ${copiedIndex === i ? 'copied' : ''}`}
                       onClick={() => handleCopy(msg.content, i)}
                       title="Copy to clipboard"
@@ -144,6 +160,7 @@ export default function ChatMessages({
 
                     {isUser && onEditMessage && (
                       <button
+                        type="button"
                         className="msg-action-btn"
                         onClick={() => onEditMessage(msg.content, i)}
                         title="Edit and resend"
@@ -154,6 +171,7 @@ export default function ChatMessages({
 
                     {!isUser && isLastAssistant && onRegenerate && !isStreaming && (
                       <button
+                        type="button"
                         className="msg-action-btn"
                         onClick={() => onRegenerate(i)}
                         title="Regenerate this response"
@@ -193,17 +211,17 @@ export default function ChatMessages({
                 <span className="msg-time">Generating…</span>
               </div>
 
-              <div className="msg-content">
-                {streamingContent ? (
-                  <MarkdownRenderer content={streamingContent} isStreaming={true} />
-                ) : (
+              {streamingContent ? (
+                <MarkdownRenderer content={streamingContent} isStreaming={true} />
+              ) : (
+                <div className="msg-content">
                   <div className="typing-indicator">
                     <div className="typing-dot" />
                     <div className="typing-dot" />
                     <div className="typing-dot" />
                   </div>
-                )}
-              </div>
+                </div>
+              )}
             </div>
           </motion.div>
         )}
@@ -211,15 +229,17 @@ export default function ChatMessages({
         <div ref={bottomRef} style={{ height: 1 }} />
       </div>
 
-      {/* Floating Scroll to Bottom Button */}
+      {/* Floating Scroll to Bottom Button (Centered floating pill above composer) */}
       {showScrollBtn && (
         <button
+          type="button"
           className="scroll-bottom-btn"
           onClick={() => scrollToBottom(true)}
-          title="Scroll to bottom"
+          title="Scroll to latest messages"
           id="scroll-to-bottom"
         >
-          <ArrowDown size={16} />
+          <ArrowDown size={14} />
+          <span>Latest messages</span>
         </button>
       )}
     </div>

@@ -27,29 +27,18 @@ export default function WelcomeScreen({ onSelectSuggestion, theme }) {
       {/* Top spacer for vertical optical centering */}
       <div className="welcome-spacer" />
 
-      {/* Hero Section: Animated Logo with Lightening Effect & Title */}
+      {/* Hero Section: Animated Logo & Title */}
       <motion.div
         className="welcome-hero"
         initial={{ opacity: 0, y: 16 }}
         animate={{ opacity: 1, y: 0 }}
         transition={{ duration: 0.45, ease: [0.16, 1, 0.3, 1] }}
       >
-        <div className="welcome-logo-lightning-wrap">
-          {/* Multi-layer atmospheric lightning aura */}
-          <div className="lightning-glow-pulse" />
-          <div className="lightning-aura" />
-          <div className="lightning-flash-ring" />
-          <div className="lightning-arcs">
-            <span className="arc arc-1" />
-            <span className="arc arc-2" />
-            <span className="arc arc-3" />
-            <span className="arc arc-4" />
-          </div>
-
+        <div className="welcome-logo-wrap">
           {/* Floating Squircle Logo */}
           <motion.div
             className="welcome-logo-box"
-            whileHover={{ scale: 1.06, rotate: -2 }}
+            whileHover={{ scale: 1.05 }}
             transition={{ type: 'spring', stiffness: 320, damping: 18 }}
           >
             <Logo theme={theme} className="welcome-hero-logo" />
@@ -59,7 +48,7 @@ export default function WelcomeScreen({ onSelectSuggestion, theme }) {
         <h2 className="welcome-title">How can I help you today?</h2>
       </motion.div>
 
-      {/* Full-width continuous prompt carousel positioned directly above the message input box */}
+      {/* Full-width live moving prompt carousel positioned directly above the message input box */}
       <motion.div
         className="welcome-bottom-carousel"
         initial={{ opacity: 0, y: 14 }}

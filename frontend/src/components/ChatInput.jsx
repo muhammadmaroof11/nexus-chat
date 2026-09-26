@@ -66,11 +66,12 @@ export default function ChatInput({
   const currentModel = models.find((m) => m.model_id === selectedModel);
   const geminiModels = models.filter((m) => m.provider === 'gemini');
   const grokModels = models.filter((m) => m.provider === 'grok');
+  const otherModels = models.filter((m) => m.provider !== 'gemini' && m.provider !== 'grok');
 
   return (
-    <div className="input-area">
-      <div className="input-container">
-        <div className="input-wrapper">
+    <div className="composer-dock">
+      <div className="composer-container">
+        <div className="composer-card">
           <textarea
             ref={textareaRef}
             className="chat-input"
@@ -82,7 +83,7 @@ export default function ChatInput({
             id="chat-input"
           />
 
-          {/* Bottom Action Bar inside Input Card */}
+          {/* Bottom Action Bar inside Composer Card */}
           <div className="input-action-bar">
             {/* Left: Model Selector Pill */}
             <div className="input-model-selector" ref={dropdownRef}>
@@ -94,7 +95,7 @@ export default function ChatInput({
                 title="Change AI model"
               >
                 <span className={`model-dot ${currentModel?.provider || ''}`} />
-                <span className="model-name">{currentModel?.label || 'Select Model'}</span>
+                <span className="model-name">{currentModel?.label || selectedModel}</span>
                 <ChevronDown size={13} style={{ opacity: 0.6 }} />
               </button>
 
@@ -102,7 +103,7 @@ export default function ChatInput({
                 {dropdownOpen && (
                   <motion.div
                     key="input-model-dropdown"
-                    className="input-model-dropdown"
+                    className="input-model-dropdown model-dropdown-floating"
                     initial={{ opacity: 0, y: 8, scale: 0.96 }}
                     animate={{ opacity: 1, y: 0, scale: 1 }}
                     exit={{ opacity: 0, y: 8, scale: 0.96 }}
@@ -155,6 +156,30 @@ export default function ChatInput({
                         ))}
                       </>
                     )}
+
+                    {otherModels.length > 0 && (
+                      <>
+                        <div className="model-dropdown-section">Other Models</div>
+                        {otherModels.map((m) => (
+                          <button
+                            key={m.model_id}
+                            type="button"
+                            className={`model-option ${m.model_id === selectedModel ? 'active' : ''}`}
+                            onClick={() => {
+                              onSelectModel(m.model_id);
+                              setDropdownOpen(false);
+                            }}
+                          >
+                            <span className={`model-dot ${m.provider || 'gemini'}`} />
+                            <div className="model-option-info">
+                              <div className="name">{m.label}</div>
+                              <div className="desc">{m.description}</div>
+                            </div>
+                            {m.model_id === selectedModel && <Check size={14} className="check" />}
+                          </button>
+                        ))}
+                      </>
+                    )}
                   </motion.div>
                 )}
               </AnimatePresence>
@@ -165,7 +190,7 @@ export default function ChatInput({
               {safeText.length > 0 && (
                 <>
                   <span className="token-badge">
-                    {safeText.length} chars · ~{tokenEstimate} tokens
+                    ~{tokenEstimate} tokens
                   </span>
                   <button
                     type="button"
@@ -186,7 +211,7 @@ export default function ChatInput({
                   title="Stop generation"
                   id="stop-btn"
                 >
-                  <Square size={14} fill="currentColor" />
+                  <Square size={13} fill="currentColor" />
                 </button>
               ) : (
                 <button
@@ -201,12 +226,6 @@ export default function ChatInput({
                 </button>
               )}
             </div>
-          </div>
-        </div>
-
-        <div className="input-footer">
-          <div className="input-footer-left">
-            <span>Enter to send · Shift+Enter for new line</span>
           </div>
         </div>
       </div>

@@ -1,23 +1,44 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
+import { motion, AnimatePresence } from 'framer-motion';
+import { PanelLeft } from 'lucide-react';
 import Sidebar from './components/Sidebar';
-import ChatHeader from './components/ChatHeader';
 import ChatMessages from './components/ChatMessages';
 import ChatInput from './components/ChatInput';
 import WelcomeScreen from './components/WelcomeScreen';
 import SystemPromptModal from './components/SystemPromptModal';
 import ShortcutsModal from './components/ShortcutsModal';
+import CursorFollow from './components/CursorFollow';
 import Toast from './components/Toast';
 import {
   fetchModels,
   fetchConversations,
   fetchConversation,
   deleteConversation,
+  renameConversation,
   clearAllConversations,
   sendMessageStream,
 } from './api';
 
 const DEFAULT_SYSTEM_PROMPT =
   'You are a helpful, friendly, and precise AI assistant. Provide clear, accurate, and concise answers.';
+
+const PERSONA_NAMES = {
+  'You are a helpful, friendly, and precise AI assistant. Provide clear, accurate, and concise answers.': 'General Assistant',
+  'You are a Principal Software Engineer. Provide production-grade, secure, performant, and idiomatic code with clean formatting and architectural reasoning.': 'Principal Engineer',
+  'You are an inspiring Socratic tutor. Guide the user through problem-solving step-by-step with intuitive explanations and thought-provoking questions.': 'Socratic Tutor',
+  'You are an executive chief of staff. Deliver punchy, high-signal bullet points, ruthless brevity, and clear actionable takeaways without fluff.': 'Executive Brief',
+  'You are a senior research scientist. Provide rigorous, evidence-grounded analysis, formal terminology, LaTeX equations where applicable, and nuanced explanations.': 'Research Scientist',
+};
+
+function getPersonaTitle(prompt) {
+  if (!prompt) return 'General Assistant';
+  const clean = prompt.trim();
+  if (PERSONA_NAMES[clean]) return PERSONA_NAMES[clean];
+  for (const [key, name] of Object.entries(PERSONA_NAMES)) {
+    if (clean.includes(key.slice(0, 30))) return name;
+  }
+  return 'Custom Persona';
+}
 
 // ── Theme & Accent Management ───────────────────────────────────────────────
 function getInitialTheme() {
@@ -51,6 +72,7 @@ export default function App() {
   const [theme, setTheme] = useState(getInitialTheme);
   const [accent, setAccent] = useState(getInitialAccent);
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
+  const [mobileSidebarOpen, setMobileSidebarOpen] = useState(false);
   const [models, setModels] = useState([]);
   const [selectedModel, setSelectedModel] = useState('gemini-2.5-flash');
   const [conversations, setConversations] = useState([]);
@@ -67,6 +89,8 @@ export default function App() {
   const [systemPrompt, setSystemPrompt] = useState(() => {
     return localStorage.getItem('nexuschat-system-prompt') || DEFAULT_SYSTEM_PROMPT;
   });
+
+  const activePersonaName = getPersonaTitle(systemPrompt);
 
   const sidebarRef = useRef(null);
   const streamControllerRef = useRef(null);
@@ -171,6 +195,25 @@ export default function App() {
       addToast('Failed to delete conversation', 'error');
     }
   };
+
+  const handleRenameConversation = useCallback(
+    async (id, newTitle) => {
+      // Optimistic title update
+      setConversations((prev) =>
+        prev.map((c) => (c.id === id ? { ...c, title: newTitle } : c))
+      );
+      try {
+        await renameConversation(id, newTitle);
+        addToast('Conversation renamed', 'success');
+        refreshConversations();
+      } catch (err) {
+        console.error('Failed to rename conversation:', err);
+        addToast('Failed to rename conversation', 'error');
+        refreshConversations();
+      }
+    },
+    [addToast, refreshConversations]
+  );
 
   const handleClearAll = async () => {
     if (window.confirm('Are you sure you want to clear all conversations?')) {
@@ -362,110 +405,196 @@ export default function App() {
     addToast('Prompt loaded into editor', 'info');
   };
 
-  // ── Export Utilities ─────────────────────────────────────────────────────
-  const getActiveTitle = () => {
-    const conv = conversations.find((c) => c.id === activeConversationId);
-    return conv ? conv.title : 'NexusChat-Conversation';
-  };
+  // ── Generalized Export Utility (Active or Historical Conversation) ───────
+  const handleExportConversation = async (conv, format) => {
+    try {
+      let targetMessages = [];
+      let title = conv?.title || 'NexusChat-Conversation';
 
-  const handleExportMarkdown = () => {
-    if (messages.length === 0) return;
-    const title = getActiveTitle();
-    let md = `# ${title}\n\n`;
-    md += `*Exported on ${new Date().toLocaleString()} from NexusChat*\n\n---\n\n`;
+      if (conv?.id === activeConversationId && messages.length > 0) {
+        targetMessages = messages;
+      } else if (conv?.id) {
+        addToast('Preparing conversation export…', 'info');
+        const data = await fetchConversation(conv.id);
+        targetMessages = data.messages || [];
+        if (data.title) title = data.title;
+      }
 
-    messages.forEach((m) => {
-      const sender = m.role === 'user' ? '### 👤 User' : `### 🤖 ${m.model || 'AI Assistant'}`;
-      md += `${sender}\n\n${m.content}\n\n---\n\n`;
-    });
+      if (targetMessages.length === 0) {
+        addToast('No messages found to export', 'warning');
+        return;
+      }
 
-    const blob = new Blob([md], { type: 'text/markdown;charset=utf-8' });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = `${title.replace(/[^a-z0-9]/gi, '_').toLowerCase()}.md`;
-    a.click();
-    URL.revokeObjectURL(url);
-    addToast('Markdown exported', 'success');
-  };
+      const safeFilename = title.replace(/[^a-z0-9]/gi, '_').toLowerCase();
 
-  const handleExportJSON = () => {
-    if (messages.length === 0) return;
-    const title = getActiveTitle();
-    const data = {
-      title,
-      exported_at: new Date().toISOString(),
-      conversation_id: activeConversationId,
-      system_prompt: systemPrompt,
-      messages,
-    };
-
-    const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = `${title.replace(/[^a-z0-9]/gi, '_').toLowerCase()}.json`;
-    a.click();
-    URL.revokeObjectURL(url);
-    addToast('JSON exported', 'success');
-  };
-
-  const handleCopyChat = () => {
-    if (messages.length === 0) return;
-    let full = '';
-    messages.forEach((m) => {
-      const sender = m.role === 'user' ? 'User' : m.model || 'AI';
-      full += `[${sender}]:\n${m.content}\n\n`;
-    });
-    navigator.clipboard.writeText(full.trim());
-    addToast('Full conversation copied to clipboard', 'success');
+      if (format === 'markdown') {
+        let md = `# ${title}\n\n`;
+        md += `*Exported on ${new Date().toLocaleString()} from NexusChat*\n\n---\n\n`;
+        targetMessages.forEach((m) => {
+          const sender = m.role === 'user' ? '### 👤 User' : `### 🤖 ${m.model || 'AI Assistant'}`;
+          md += `${sender}\n\n${m.content}\n\n---\n\n`;
+        });
+        const blob = new Blob([md], { type: 'text/markdown;charset=utf-8' });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = `${safeFilename}.md`;
+        a.click();
+        URL.revokeObjectURL(url);
+        addToast('Markdown exported', 'success');
+      } else if (format === 'json') {
+        const exportData = {
+          title,
+          exported_at: new Date().toISOString(),
+          conversation_id: conv?.id || activeConversationId,
+          system_prompt: systemPrompt,
+          messages: targetMessages,
+        };
+        const blob = new Blob([JSON.stringify(exportData, null, 2)], { type: 'application/json' });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = `${safeFilename}.json`;
+        a.click();
+        URL.revokeObjectURL(url);
+        addToast('JSON exported', 'success');
+      } else if (format === 'copy') {
+        let full = '';
+        targetMessages.forEach((m) => {
+          const sender = m.role === 'user' ? 'User' : m.model || 'AI';
+          full += `[${sender}]:\n${m.content}\n\n`;
+        });
+        await navigator.clipboard.writeText(full.trim());
+        addToast('Transcript copied to clipboard', 'success');
+      }
+    } catch (err) {
+      console.error('Export error:', err);
+      addToast('Failed to export conversation', 'error');
+    }
   };
 
   const showWelcome = messages.length === 0 && !isStreaming;
 
+  const handleToggleSidebar = () => {
+    if (window.innerWidth <= 768) {
+      setMobileSidebarOpen((prev) => !prev);
+    } else {
+      setSidebarCollapsed((prev) => !prev);
+    }
+  };
+
   return (
     <div className="app-layout">
       <Toast toasts={toasts} onDismiss={dismissToast} />
+
+      {/* Mobile backdrop */}
+      <div
+        className={`sidebar-backdrop ${mobileSidebarOpen ? 'visible' : ''}`}
+        onClick={() => setMobileSidebarOpen(false)}
+        aria-hidden="true"
+      />
 
       <Sidebar
         ref={sidebarRef}
         conversations={conversations}
         activeConversationId={activeConversationId}
         collapsed={sidebarCollapsed}
-        onToggleSidebar={() => setSidebarCollapsed(!sidebarCollapsed)}
-        onSelectConversation={handleSelectConversation}
-        onNewChat={handleNewChat}
+        mobileOpen={mobileSidebarOpen}
+        onCloseMobile={() => setMobileSidebarOpen(false)}
+        onToggleSidebar={handleToggleSidebar}
+        onSelectConversation={(id) => {
+          handleSelectConversation(id);
+          setMobileSidebarOpen(false);
+        }}
+        onNewChat={() => {
+          handleNewChat();
+          setMobileSidebarOpen(false);
+        }}
         onDeleteConversation={handleDeleteConversation}
+        onRenameConversation={handleRenameConversation}
+        onExportConversation={handleExportConversation}
         onClearAll={handleClearAll}
         onOpenSettings={() => setIsSettingsOpen(true)}
         onOpenShortcuts={() => setIsShortcutsOpen(true)}
+        theme={theme}
+        onSetTheme={handleSetTheme}
       />
 
       <main className="main-area">
-        <ChatHeader
-          sidebarCollapsed={sidebarCollapsed}
-          onToggleSidebar={() => setSidebarCollapsed(!sidebarCollapsed)}
-          theme={theme}
-          onSetTheme={handleSetTheme}
-          onExportMarkdown={handleExportMarkdown}
-          onExportJSON={handleExportJSON}
-          onCopyChat={handleCopyChat}
-          hasMessages={messages.length > 0}
-          onOpenSettings={() => setIsSettingsOpen(true)}
-        />
+        {/* React Bits Interactive Cursor Follow & Splash Animation */}
+        <CursorFollow theme={theme} />
 
-        {showWelcome ? (
-          <WelcomeScreen onSelectSuggestion={handleSend} theme={theme} />
-        ) : (
-          <ChatMessages
-            messages={messages}
-            streamingContent={streamingContent}
-            isStreaming={isStreaming}
-            selectedModel={selectedModel}
-            onRegenerate={handleRegenerate}
-            onEditMessage={handleEditMessage}
-          />
-        )}
+        {/* Floating mobile drawer trigger (Gemini style) */}
+        <button
+          type="button"
+          className="mobile-menu-trigger"
+          onClick={() => setMobileSidebarOpen(true)}
+          title="Open sidebar"
+          aria-label="Open sidebar menu"
+        >
+          <PanelLeft size={18} />
+        </button>
+
+        {/* Top-Right Floating Agent Persona Widget with Live Thinking/Signal Indicator */}
+        <motion.button
+          type="button"
+          className="agent-persona-widget"
+          onClick={() => setIsSettingsOpen(true)}
+          title="Edit Agent Persona & Instructions (Ctrl+,)"
+          id="agent-persona-btn"
+          whileHover={{ scale: 1.03 }}
+          whileTap={{ scale: 0.97 }}
+        >
+          <div className="agent-signal-box">
+            <span className="agent-emoji">{isStreaming ? '⚡' : '🧠'}</span>
+            <span className={`agent-signal-ring ${isStreaming ? 'thinking' : ''}`} />
+          </div>
+          <div className="agent-info">
+            <span className="agent-name">{activePersonaName}</span>
+            <span className="agent-desc">
+              <span className={`live-dot ${isStreaming ? 'thinking' : ''}`} />
+              {isStreaming ? 'Thinking…' : 'Persona Active · Edit'}
+            </span>
+          </div>
+        </motion.button>
+
+        <div className="chat-stage">
+          <AnimatePresence mode="wait">
+            {showWelcome ? (
+              <motion.div
+                key="stage-welcome"
+                className="stage-transition-wrap"
+                initial={{ opacity: 0, y: 8 }}
+                animate={{ opacity: 1, y: 0 }}
+                exit={{ opacity: 0, y: -8 }}
+                transition={{ duration: 0.2, ease: [0.16, 1, 0.3, 1] }}
+              >
+                <WelcomeScreen onSelectSuggestion={handleSend} theme={theme} />
+              </motion.div>
+            ) : (
+              <motion.div
+                key={`stage-chat-${activeConversationId || 'current'}`}
+                className="stage-transition-wrap"
+                initial={{ opacity: 0, y: 8 }}
+                animate={{ opacity: 1, y: 0 }}
+                exit={{ opacity: 0, y: -8 }}
+                transition={{ duration: 0.2, ease: [0.16, 1, 0.3, 1] }}
+              >
+                <ChatMessages
+                  messages={messages}
+                  streamingContent={streamingContent}
+                  isStreaming={isStreaming}
+                  selectedModel={selectedModel}
+                  onRegenerate={handleRegenerate}
+                  onEditMessage={handleEditMessage}
+                />
+              </motion.div>
+            )}
+          </AnimatePresence>
+
+          {/* Atmospheric bottom scrim overlay (only active during chat stream) */}
+          {!showWelcome && <div className="chat-bottom-scrim" aria-hidden="true" />}
+        </div>
 
         <ChatInput
           text={inputPrompt}
